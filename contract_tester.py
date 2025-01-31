@@ -342,17 +342,18 @@ class ContractTester:
     def _quick_call(self):
         """ 快速调用模式（默认入口） """
         print("\n===== 快速调用模式 (输入exit退出) =====")
+        print("\n输入格式: 函数名 参数1 参数2 ...")
+        
+        # 显示可用函数列表
+        print("\n===== 可用函数 =====")
+        funcs = [fn for fn in self.contract_instance.abi if fn['type'] == 'function']
+        for i, fn in enumerate(funcs, 1):
+            inputs = ','.join([i['type'] for i in fn.get('inputs', [])])
+            print(f"{i}. {fn['name']}({inputs})")
+        print("=====================")
+            
         while True:
-            print("\n输入格式: 函数名 参数1 参数2 ...")
-            
-            # 显示可用函数列表
-            print("\n===== 可用函数 =====")
-            funcs = [fn for fn in self.contract_instance.abi if fn['type'] == 'function']
-            for i, fn in enumerate(funcs, 1):
-                inputs = ','.join([i['type'] for i in fn.get('inputs', [])])
-                print(f"{i}. {fn['name']}({inputs})")
-            print("=====================")
-            
+
             cmd = input("> ").strip()
             if cmd.lower() in ('exit', 'quit', 'q'):
                 break
