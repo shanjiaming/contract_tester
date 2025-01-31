@@ -1,5 +1,6 @@
 import os
 import json
+import requests
 import shutil
 import argparse
 from web3 import Web3
@@ -8,18 +9,24 @@ import subprocess
 import atexit
 import signal
 import time
+from dotenv import load_dotenv
 
 class ContractTester:
+    ETHERSCAN_API = "https://api.etherscan.io/api"
     def __init__(self):
-        self.anvil_process = None
+        self.anvil_process = None  # 仅用于本地合约测试
         self._start_anvil()  # 新增：自动启动Anvil
         self.w3 = Web3(Web3.HTTPProvider('http://localhost:8545'))
         self.accounts = self._get_anvil_accounts()
         self.contract_instance = None
         self.contract_address = None
+        self.etherscan_api_key = os.getenv('ETHERSCAN_API_KEY')
+        self.alchemy_api_key = os.getenv('ALCHEMY_API_KEY')
         self.call_history = []
 
+
     def _start_anvil(self):
+        """ 仅当需要本地部署时启动 """
         """ 自动启动Anvil本地节点 """
         try:
             # 检查anvil是否安装
@@ -105,6 +112,34 @@ class ContractTester:
         
         return self._load_artifacts(output_dir, contract_name)
 
+    def load_from_mainnet(self, address):
+        """ 模式4: 从主网加载合约（使用公共节点） """
+        if not self.etherscan_api_key:
+            raise ValueError("需要设置ETHERSCAN_API_KEY环境变量")
+        
+        # 获取合约ABI
+        params = {
+            'module': 'contract',
+            'action': 'getabi',
+            'address': address,
+            'apikey': self.etherscan_api_key
+        }
+        response = requests.get(self.ETHERSCAN_API, params=params)
+        if response.status_code != 200:
+            raise ConnectionError(f"Etherscan请求失败: {response.text}")
+        
+        data = response.json()
+        if data['status'] != '1':
+            raise ValueError(f"获取ABI失败: {data['result']}")
+        
+        abi = json.loads(data['result'])
+        
+        # 切换为公共节点
+        self.w3 = Web3(Web3.HTTPProvider(f'https://eth-mainnet.g.alchemy.com/v2/{self.alchemy_api_key}'))
+        
+        self.contract_address = address  # 新增：设置合约地址
+        return abi, None  # 主网合约不需要字节码
+
     def load_from_abi_bin(self, abi_path, bin_path):
         """ 模式2: 直接加载提供的ABI和BIN文件 """
         # 直接加载ABI文件
@@ -171,6 +206,10 @@ class ContractTester:
 
     def deploy(self, abi, bytecode):
         """ 部署合约 """
+        # 处理主网合约不需要部署的情况
+        if bytecode is None:
+            return
+        
         # 添加部署参数验证
         # print(f"原始字节码长度: {len(bytecode)} 字符")
         if len(bytecode) < 100:
@@ -202,6 +241,7 @@ class ContractTester:
             address=self.contract_address, 
             abi=abi
         )
+        print(f"✅ 主网合约加载成功，地址: {self.contract_address}")
         print(f"✅ Contract deployed at: {self.contract_address}")
 
     def interactive_mode(self):
@@ -214,6 +254,8 @@ class ContractTester:
                 self._show_history()
             elif choice == '3':
                 self._check_balance()
+            elif choice == '4':
+                self._read_storage()
             elif choice == '0':
                 break
             else:
@@ -223,17 +265,26 @@ class ContractTester:
             print("1. 🚀 快速调用模式")
             print("2. 📜 查看调用历史")
             print("3. 💰 查看账户余额")
+            print("4. 🗄️ 读取存储变量")
             print("0. 退出")
             
             choice = input("请输入选项: ").strip()
 
     def _read_storage(self):
-        """ 读取存储 """
-        slot = input("输入存储槽位（十进制）: ").strip()
+        """ 读取存储变量 """
+        print("\n===== 存储读取模式 =====")
+        if not self.contract_address:
+            print("❌ 未部署合约或未加载主网合约")
+            return
+        slot = input("输入存储槽位（十六进制或十进制）: ").strip()
         try:
-            value = self.w3.eth.get_storage_at(self.contract_address, int(slot))
-            print(f"存储槽 {slot} 的值: {value.hex()}")
+            slot_int = int(slot, 16) if slot.startswith('0x') else int(slot)
+            value = self.w3.eth.get_storage_at(self.contract_address, slot_int)
+            print(f"存储槽 {hex(slot_int)} 的值: {value.hex()}")
+            print(f"十进制: {int.from_bytes(value, 'big')}")
         except Exception as e:
+            if hasattr(e, 'args') and 'message' in e.args[0]:
+                print(f"详细错误: {e.args[0]['message']}")
             print(f"❌ 读取失败: {str(e)}")
 
     def _check_balance(self):
@@ -342,6 +393,7 @@ class ContractTester:
     def _quick_call(self):
         """ 快速调用模式（默认入口） """
         print("\n===== 快速调用模式 (输入exit退出) =====")
+        print(f"当前节点: {'本地Anvil' if self._is_anvil() else '公共节点'}")
         print("\n输入格式: 函数名 参数1 参数2 ...")
         
         # 显示可用函数列表
@@ -376,7 +428,10 @@ class ContractTester:
                 is_view = func.get('stateMutability') in ('view', 'pure')
                 
                 # 参数转换
-                converted = self._convert_arguments(params, func.get('inputs', []))
+                try:
+                    converted = self._convert_arguments(params, func.get('inputs', []))
+                except ValueError as e:
+                    raise ValueError(f"参数转换失败: {str(e)}")
                 
                 # 视图调用
                 result = getattr(self.contract_instance.functions, func_name)(*converted).call()
@@ -468,12 +523,14 @@ class ContractTester:
             return f"原始数据: {hex_data}"
 
 if __name__ == "__main__":
+    load_dotenv()  # 加载.env文件
     parser = argparse.ArgumentParser(description="智能合约测试工具")
     
     # 参数组调整
     parser.add_argument('--solidity', help="Solidity源文件路径")
     parser.add_argument('--abi', help="ABI文件路径（需与--bin一起使用）")
     parser.add_argument('--bin', help="字节码文件路径")
+    parser.add_argument('--mainnet', help="主网合约地址")
     
     parser.add_argument('--interactive', action='store_true', help="进入交互模式")
     args = parser.parse_args()
@@ -481,7 +538,10 @@ if __name__ == "__main__":
     tester = ContractTester()
     
     try:
-        if args.solidity and not (args.abi or args.bin):
+        if args.mainnet:
+            abi, bytecode = tester.load_from_mainnet(args.mainnet)
+            tester.contract_instance = tester.w3.eth.contract(address=args.mainnet, abi=abi)
+        elif args.solidity and not (args.abi or args.bin):
             abi, bytecode = tester.load_from_solidity(args.solidity)
         elif args.abi and args.bin:
             if not os.path.exists(args.abi) or not os.path.exists(args.bin):
@@ -495,9 +555,11 @@ if __name__ == "__main__":
             raise ValueError("无效的参数组合，请使用以下组合之一：\n"
                              "1. --solidity [文件路径]\n"
                              "2. --abi [abi文件] --bin [bin文件]\n"
-                             "3. --bin [bin文件]")
+                             "3. --bin [bin文件]\n"
+                             "4. --mainnet [合约地址]")
 
-        tester.deploy(abi, bytecode)
+        if bytecode is not None:  # 仅当有字节码时部署
+            tester.deploy(abi, bytecode)
         
         if args.interactive:
             tester.interactive_mode()
