@@ -16,7 +16,9 @@ options:
 ```
 
 推荐使用方法：
---abi 和 --bin同时提供，或只提供--sol
+
+--abi 和 --bin同时提供，或只提供--sol。
+
 启用--interactive更方便，不然还需要改代码。
 
 example:
