@@ -2,7 +2,7 @@
 
 `contract_tester.py` - 交互式智能合约测试脚本
 
-## ░ 快速使用
+## 快速使用
 
 ```bash
 # 基本命令格式
@@ -12,7 +12,7 @@ python contract_tester.py [--solidity SOLIDITY_FILE]
                           [--interactive]
 ```
 
-## ░ 参数说明
+## 参数说明
 
 | 参数            | 说明                          |
 |-----------------|-------------------------------|
@@ -21,7 +21,7 @@ python contract_tester.py [--solidity SOLIDITY_FILE]
 | `--mainnet`     | 主网合约地址(需配置API密钥)   |
 | `--interactive` | 启用交互模式（推荐）          |
 
-## ░ 配置要求
+## 配置要求
 
 ### 密钥环境（使用主网合约时需要）
 ```bash
@@ -40,7 +40,7 @@ sudo apt-get install solc  # Solidity编译器
 cargo install anvil        # 本地测试节点
 ```
 
-## ░ 使用示例
+## 使用示例
 
 ### 示例合约
 ```solidity
@@ -70,7 +70,7 @@ python contract_tester.py --solidity sol/symuint.sol --interactive
    ✅ 返回值: 5
 ```
 
-## ░ 功能菜单
+## 功能菜单
 
 ### 主菜单界面
 ```
