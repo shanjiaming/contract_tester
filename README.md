@@ -11,6 +11,7 @@ python contract_tester.py [--solidity SOLIDITY_FILE]
                           [--mainnet CONTRACT_ADDRESS]
                           [--interactive]
 ```
+tab补全，uparrow翻看历史指令。
 
 ## 参数说明
 
