@@ -10,6 +10,47 @@ import atexit
 import signal
 import time
 from dotenv import load_dotenv
+import sys
+import readline
+import rlcompleter
+
+# 如果是Windows系统，使用pyreadline
+if sys.platform == 'win32':
+    from pyreadline import Readline
+    readline = Readline()
+else:
+    import readline
+
+# 添加历史记录文件路径
+HISTORY_PATH = os.path.expanduser('~/.contract_tester_history')
+
+class ContractCompleter:
+    def __init__(self, tester):
+        self.tester = tester
+        self.matches = []
+        
+    def complete(self, text, state):
+        if state == 0:
+            funcs = self.tester._get_available_functions()
+            current_line = readline.get_line_buffer().split()
+            
+            # 获取当前输入的部分
+            if not current_line:
+                prefix = ''
+            else:
+                prefix = current_line[0].lower()
+            
+            # 生成简洁的补全建议
+            self.matches = []
+            for fn in funcs:
+                name = fn['name']
+                if name.lower().startswith(prefix):
+                    self.matches.append(f"{name} ")  # 仅补全函数名加空格
+        
+        try:
+            return self.matches[state]
+        except IndexError:
+            return None
 
 class ContractTester:
     ETHERSCAN_API = "https://api.etherscan.io/api"
@@ -23,7 +64,8 @@ class ContractTester:
         self.etherscan_api_key = os.getenv('ETHERSCAN_API_KEY')
         self.alchemy_api_key = os.getenv('ALCHEMY_API_KEY')
         self.call_history = []
-
+        # 初始化时加载历史记录
+        self._init_readline()
 
     def _start_anvil(self):
         """ 仅当需要本地部署时启动 """
@@ -380,7 +422,7 @@ class ContractTester:
             try:
                 if abi_type['type'].startswith('uint'):
                     converted.append(int(raw))
-                elif abi_type['type'].startswith('bytes'):
+                elif abi_type['type'].startswith('bytes') or abi_type['type'].startswith('address') or abi_type['type'].startswith('string'):
                     if raw.startswith('0x'):
                         converted.append(bytes.fromhex(raw[2:]))
                     else:
@@ -390,6 +432,28 @@ class ContractTester:
                 raise ValueError(f"参数 {abi_type['name']} 类型错误: {str(e)}")
         return converted
 
+    def _init_readline(self):
+        """ 初始化readline配置 """
+        # 设置自定义补全器
+        self.completer = ContractCompleter(self)
+        readline.set_completer(self.completer.complete)
+        readline.parse_and_bind("tab: complete")
+        
+        # 加载历史记录
+        if os.path.exists(HISTORY_PATH):
+            try:
+                readline.read_history_file(HISTORY_PATH)
+            except IOError:
+                pass
+        
+        # 注册退出时保存历史记录
+        atexit.register(self._save_history)
+
+    def _save_history(self):
+        """ 保存历史记录 """
+        readline.set_history_length(1000)
+        readline.write_history_file(HISTORY_PATH)
+
     def _quick_call(self):
         """ 快速调用模式（默认入口） """
         print("\n===== 快速调用模式 (输入exit退出) =====")
@@ -398,15 +462,23 @@ class ContractTester:
         
         # 显示可用函数列表
         print("\n===== 可用函数 =====")
-        funcs = [fn for fn in self.contract_instance.abi if fn['type'] == 'function']
+        funcs = self._get_available_functions()
         for i, fn in enumerate(funcs, 1):
             inputs = ','.join([i['type'] for i in fn.get('inputs', [])])
             print(f"{i}. {fn['name']}({inputs})")
         print("=====================")
             
         while True:
-
-            cmd = input("> ").strip()
+            try:
+                # 使用readline获取输入
+                cmd = input("> ").strip()
+            except EOFError:
+                break  # 处理Ctrl+D
+                
+            # 添加命令到历史记录
+            if cmd:
+                readline.add_history(cmd)
+                
             if cmd.lower() in ('exit', 'quit', 'q'):
                 break
             try:
@@ -521,6 +593,12 @@ class ContractTester:
         except Exception as e:
             print(f"⚠️ 解码失败: {str(e)}")
             return f"原始数据: {hex_data}"
+
+    def _get_available_functions(self):
+        """获取当前合约的可用函数列表"""
+        if not self.contract_instance:
+            return []
+        return [fn for fn in self.contract_instance.abi if fn['type'] == 'function']
 
 if __name__ == "__main__":
     load_dotenv()  # 加载.env文件
