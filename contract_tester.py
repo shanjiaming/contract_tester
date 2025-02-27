@@ -131,7 +131,7 @@ class ContractTester:
         os.makedirs(output_dir, exist_ok=True)
         
         # 编译合约
-        cmd = f'solc --abi --bin {sol_path} -o {output_dir} --overwrite'
+        cmd = f'solc --abi --bin --bin-runtime {sol_path} -o {output_dir} --overwrite'
         result = subprocess.run(cmd, shell=True, capture_output=True)
         if result.returncode != 0:
             raise RuntimeError(f"Compilation failed:\n{result.stderr.decode()}")
